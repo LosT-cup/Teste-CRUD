@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CRUD Firebase</title>
+<style>
+  :root {
+    --bg: #f4f6fa; --card: #fff; --text: #1e2430; --muted: #6b7280;
+    --primary: #2563eb; --primary-h: #1d4ed8; --danger: #dc2626; --danger-h: #b91c1c;
+    --border: #e5e7eb; --ok: #16a34a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         background: var(--bg); color: var(--text); }
+  .container { max-width: 900px; margin: 0 auto; padding: 24px 16px; }
+  h1 { margin: 0 0 4px; font-size: 1.6rem; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+          padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+  .card h2 { margin: 0 0 16px; font-size: 1.1rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+  label { display: block; font-size: .85rem; color: var(--muted); margin-bottom: 4px; }
+  input { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+          font-size: 1rem; }
+  input:focus { outline: 2px solid var(--primary); border-color: transparent; }
+  .actions { margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap; }
+  button { border: 0; border-radius: 8px; padding: 10px 16px; font-size: .95rem; cursor: pointer;
+           font-weight: 500; }
+  .btn-primary { background: var(--primary); color: #fff; }
+  .btn-primary:hover { background: var(--primary-h); }
+  .btn-secondary { background: #e5e7eb; color: var(--text); }
+  .btn-secondary:hover { background: #d1d5db; }
+  .btn-sm { padding: 6px 10px; font-size: .85rem; }
+  .btn-edit { background: #fef3c7; color: #92400e; }
+  .btn-edit:hover { background: #fde68a; }
+  .btn-del { background: #fee2e2; color: var(--danger); }
+  .btn-del:hover { background: #fecaca; }
+  .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px;
+             flex-wrap: wrap; margin-bottom: 12px; }
+  .toolbar input { max-width: 280px; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); }
+  th { font-size: .8rem; text-transform: uppercase; color: var(--muted); letter-spacing: .03em; }
+  td.acoes { white-space: nowrap; text-align: right; }
+  td.acoes button + button { margin-left: 6px; }
+  .empty { text-align: center; color: var(--muted); padding: 24px; }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(100px);
+           background: var(--text); color: #fff; padding: 12px 18px; border-radius: 8px;
+           transition: transform .3s; z-index: 10; }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+  .toast.erro { background: var(--danger); }
+  .toast.ok { background: var(--ok); }
+  .badge { font-size: .8rem; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Cadastro de Contatos</h1>
+  <p class="sub">CRUD simples com Firebase Firestore</p>
+
+  <div class="card">
+    <h2 id="form-titulo">Novo contato</h2>
+    <form id="form">
+      <input type="hidden" id="id">
+      <div class="grid">
+        <div>
+          <label for="nome">Nome *</label>
+          <input id="nome" required placeholder="Ex.: Maria Silva">
+        </div>
+        <div>
+          <label for="email">E-mail</label>
+          <input id="email" type="email" placeholder="maria@email.com">
+        </div>
+        <div>
+          <label for="telefone">Telefone</label>
+          <input id="telefone" placeholder="(21) 99999-9999">
+        </div>
+      </div>
+      <div class="actions">
+        <button type="submit" class="btn-primary" id="btn-salvar">Adicionar</button>
+        <button type="button" class="btn-secondary" id="btn-cancelar" hidden>Cancelar edição</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="toolbar">
+      <h2 style="margin:0">Contatos <span class="badge" id="contador"></span></h2>
+      <input id="busca" placeholder="Buscar por nome, e-mail ou telefone...">
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Nome</th><th>E-mail</th><th>Telefone</th><th></th></tr>
+        </thead>
+        <tbody id="lista">
+          <tr><td colspan="4" class="empty">Carregando...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import {
+    getFirestore, collection, addDoc, updateDoc, deleteDoc, doc,
+    onSnapshot, query, orderBy, serverTimestamp
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyB4o7FuPDSFGjsJ-saH4W3cmtVC7fNAgd4",
+    authDomain: "teste-crud-bf91d.firebaseapp.com",
+    projectId: "teste-crud-bf91d",
+    storageBucket: "teste-crud-bf91d.firebasestorage.app",
+    messagingSenderId: "934384340341",
+    appId: "1:934384340341:web:ba22ecd9191d71faec973c"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+  const colecao = collection(db, "contatos");
+
+  // Elementos
+  const $ = (id) => document.getElementById(id);
+  const form = $("form"), campoId = $("id"), nome = $("nome"), email = $("email"), telefone = $("telefone");
+  const btnSalvar = $("btn-salvar"), btnCancelar = $("btn-cancelar"), formTitulo = $("form-titulo");
+  const lista = $("lista"), busca = $("busca"), contador = $("contador");
+
+  let contatos = [];
+
+  function toast(msg, tipo = "") {
+    const t = $("toast");
+    t.textContent = msg;
+    t.className = "toast show " + tipo;
+    clearTimeout(t._timer);
+    t._timer = setTimeout(() => t.className = "toast", 2800);
+  }
+
+  function escapar(s) {
+    return String(s ?? "").replace(/[&<>"']/g, c =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  // READ (tempo real)
+  onSnapshot(query(colecao, orderBy("nome")), (snap) => {
+    contatos = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderizar();
+  }, (erro) => {
+    console.error(erro);
+    lista.innerHTML = `<tr><td colspan="4" class="empty">Erro ao carregar: ${escapar(erro.message)}</td></tr>`;
+    toast("Erro ao ler dados. Verifique as regras do Firestore.", "erro");
+  });
+
+  function renderizar() {
+    const termo = busca.value.trim().toLowerCase();
+    const filtrados = contatos.filter(c =>
+      [c.nome, c.email, c.telefone].some(v => (v || "").toLowerCase().includes(termo)));
+
+    contador.textContent = `(${filtrados.length})`;
+
+    if (!filtrados.length) {
+      lista.innerHTML = `<tr><td colspan="4" class="empty">${contatos.length ? "Nenhum resultado." : "Nenhum contato cadastrado."}</td></tr>`;
+      return;
+    }
+
+    lista.innerHTML = filtrados.map(c => `
+      <tr>
+        <td>${escapar(c.nome)}</td>
+        <td>${escapar(c.email)}</td>
+        <td>${escapar(c.telefone)}</td>
+        <td class="acoes">
+          <button class="btn-sm btn-edit" data-acao="editar" data-id="${c.id}">Editar</button>
+          <button class="btn-sm btn-del" data-acao="excluir" data-id="${c.id}">Excluir</button>
+        </td>
+      </tr>`).join("");
+  }
+
+  busca.addEventListener("input", renderizar);
+
+  // CREATE / UPDATE
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const dados = {
+      nome: nome.value.trim(),
+      email: email.value.trim(),
+      telefone: telefone.value.trim()
+    };
+    if (!dados.nome) return toast("Informe o nome.", "erro");
+
+    btnSalvar.disabled = true;
+    try {
+      if (campoId.value) {
+        await updateDoc(doc(db, "contatos", campoId.value), { ...dados, atualizadoEm: serverTimestamp() });
+        toast("Contato atualizado!", "ok");
+      } else {
+        await addDoc(colecao, { ...dados, criadoEm: serverTimestamp() });
+        toast("Contato adicionado!", "ok");
+      }
+      limparForm();
+    } catch (erro) {
+      console.error(erro);
+      toast("Erro ao salvar: " + erro.message, "erro");
+    } finally {
+      btnSalvar.disabled = false;
+    }
+  });
+
+  // Ações da tabela (editar / excluir)
+  lista.addEventListener("click", async (e) => {
+    const btn = e.target.closest("button[data-acao]");
+    if (!btn) return;
+    const c = contatos.find(x => x.id === btn.dataset.id);
+    if (!c) return;
+
+    if (btn.dataset.acao === "editar") {
+      campoId.value = c.id;
+      nome.value = c.nome || "";
+      email.value = c.email || "";
+      telefone.value = c.telefone || "";
+      formTitulo.textContent = "Editar contato";
+      btnSalvar.textContent = "Salvar alterações";
+      btnCancelar.hidden = false;
+      nome.focus();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    // DELETE
+    if (btn.dataset.acao === "excluir") {
+      if (!confirm(`Excluir "${c.nome}"?`)) return;
+      try {
+        await deleteDoc(doc(db, "contatos", c.id));
+        if (campoId.value === c.id) limparForm();
+        toast("Contato excluído.", "ok");
+      } catch (erro) {
+        console.error(erro);
+        toast("Erro ao excluir: " + erro.message, "erro");
+      }
+    }
+  });
+
+  btnCancelar.addEventListener("click", limparForm);
+
+  function limparForm() {
+    form.reset();
+    campoId.value = "";
+    formTitulo.textContent = "Novo contato";
+    btnSalvar.textContent = "Adicionar";
+    btnCancelar.hidden = true;
+  }
+</script>
+</body>
+</html>
